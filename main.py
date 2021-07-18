@@ -45,7 +45,7 @@ def write(message):
         cur_markup = markup
         if is_admin:
             cur_markup = admin_markup
-        if "\n" in text or ';' in text or len(text) > 123 and not is_admin:
+        elif "\n" in text or ';' in text or len(text) > 123:
             bot.send_message(
                 message.chat.id, "Не очень похоже на название фильма 👀")
             return 0

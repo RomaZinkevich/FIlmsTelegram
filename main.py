@@ -24,7 +24,7 @@ item2 = types.KeyboardButton("Неделя")
 item3 = types.KeyboardButton("Месяц")
 date_markup.add(item1, item2, item3)
 
-OFFER = 'Если вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на номер нашей карты ➡️ 4274 3200 7290 8869'
+OFFER = 'Если вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869'
 
 
 @bot.message_handler(commands=['start'])
@@ -45,7 +45,7 @@ def write(message):
         cur_markup = markup
         if is_admin:
             cur_markup = admin_markup
-        if "\n" in text or ';' in text or len(text) > 123:
+        if "\n" in text or ';' in text or len(text) > 123 and not is_admin:
             bot.send_message(
                 message.chat.id, "Не очень похоже на название фильма 👀")
             return 0

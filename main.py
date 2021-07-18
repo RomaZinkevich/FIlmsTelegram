@@ -120,7 +120,8 @@ def write(message):
                 bot.send_message(
                     message.chat.id, "<pre><b>Название" + " " * 13 + "|" + " " * 2 + "Голоса\n" + "-" * 21 + "+" + "-" * 8 + "\n" + text + "</b></pre>", reply_markup=cur_markup, parse_mode='HTML')
             else:
-                bot.send_message(message.chat.id, "Заказов пока нет")
+                bot.send_message(
+                    message.chat.id, "Заказов пока нет", reply_markup=cur_markup)
         else:
             current_id = message.from_user.id
             film_title = text.lower()

@@ -4,35 +4,34 @@ import sqlite3
 import datetime
 
 
+# токен необходимый для работы бота
 TOKEN = '1820942989:AAFyDaAORsTc7Hy2gYT1mscO1vbZlB4KcH4'
 bot = telebot.TeleBot(TOKEN)
 
+# клавиатура для обычных пользователей
 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 item = types.KeyboardButton("Заказать фильм 🎥")
 markup.add(item)
 
-admin_markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+admin_markup = types.ReplyKeyboardMarkup(
+    resize_keyboard=True)  # клавиатура для админов
 item1 = types.KeyboardButton("Заказать фильм 🎥")
 item2 = types.KeyboardButton("Посмотреть заказы 💾")
 item3 = types.KeyboardButton("Создать текст ✉️")
 item4 = types.KeyboardButton("Отправить БД 📝")
 item5 = types.KeyboardButton("Удалить фильм из базы данных ❌")
-item6 = types.KeyboardButton("Начать технические работы 👷🏻‍♂️")
-item7 = types.KeyboardButton("Закончить технические работы 👷🏻‍♂️")
-admin_markup.add(item1, item2, item3, item4, item5, item6, item7)
-
-date_markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-item1 = types.KeyboardButton("День")
-item2 = types.KeyboardButton("Неделя")
-item3 = types.KeyboardButton("Месяц")
-date_markup.add(item1, item2, item3)
+item6 = types.KeyboardButton("Технические работы 👷🏻‍♂️")
+admin_markup.add(item1, item2, item3, item4, item5, item6)
 
 OFFER = 'Если вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869'
+
+# глобальная переменная с ID админов канала
+ADMINS_ID = [322846366, 1042144066]
 
 
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    if message.from_user.id in [322846366, 1042144066]:
+    if message.from_user.id in ADMINS_ID:  # разные сообщения для пользователей и админов
         bot.send_message(
             message.chat.id, 'Выберите одно из действий ниже ⬇️', reply_markup=admin_markup)
     else:
@@ -41,59 +40,150 @@ def welcome(message):
 
 
 @bot.message_handler(commands=['delete'])
-def welcome(message):
-    if message.from_user.id in [322846366, 1042144066]:
+def delete(message):
+    if message.from_user.id in ADMINS_ID:
         try:
-            film_id = message.text[8:]
-
             con = sqlite3.connect("db.db")
             cur = con.cursor()
 
+            # подготовка переменных
+            film_id = message.text[8:]
             last_film = cur.execute(
                 "SELECT * FROM films ORDER BY id").fetchall()
             last_film = last_film[-1]
             last_id, name, votes, dates = last_film
-            if last_id < int(film_id):
-                bot.send_message(message.chat.id, "Такого id не существует")
-                return 0
-            cur.execute("DELETE FROM films WHERE id=?", (film_id,))
-            if last_id > int(film_id):
-                cur.execute("DELETE FROM films WHERE id=?", (last_id,))
-                cur.execute("INSERT INTO films VALUES (?,?,?,?)",
-                            (film_id, name, votes, dates))
 
-            res = cur.execute(
-                "SELECT * FROM users").fetchall()
+            del_from_films(film_id, cur, last_id, name, votes, dates, message)
             last_id = str(last_id)
-            deletable = film_id
-            for i in res:
-                if deletable in str(i[1]).split(";"):
-                    films = str(i[1])
-                    last_id_check = str(i[1]).split(";")[-1]
-                    first_id_check = str(i[1]).split(";")[0]
-                    if last_id not in str(i[1]).split(";"):
-                        last_id = deletable
-                    if last_id != last_id_check:
-                        films = films.replace(f'{last_id};', '')
-                    elif last_id_check == first_id_check:
-                        films = films.replace(f'{last_id}', '')
-                    else:
-                        films = films.replace(f';{last_id}', '')
+            del_from_users(film_id, cur, last_id, name, votes, dates, message)
 
-                elif last_id in str(i[1]).split(";"):
-                    films = str(i[1])
-                    films = films.replace(f'{last_id}', '')
-                if films:
-                    cur.execute(
-                        "UPDATE users SET films=? WHERE id=?", (films, i[0]))
-                else:
-                    cur.execute(
-                        "DELETE FROM users WHERE id=?", (i[0],))
             con.commit()
             con.close()
             bot.send_message(
                 message.chat.id, "Успешно удалено", reply_markup=admin_markup)
-        except:
+        except exception as e:
+            bot.send_message(
+                message.chat.id, "Ты дурак?", reply_markup=admin_markup)
+
+
+@bot.message_handler(commands=['tech_works'])
+def tech_works(message):
+    if message.from_user.id in ADMINS_ID:
+        try:
+            con = sqlite3.connect("db.db")
+            cur = con.cursor()
+            text = message.text[12:]
+            flag = cur.execute("SELECT flag FROM works").fetchone()[0]
+
+            if text == 'start':  # проверка что именно делать
+                start = 1
+            elif text == "end":
+                start = 0
+
+            if flag != start:  # если работы в том же состоянии в которое просят перевести бот ничего не пишет
+                flag = abs(flag - 1)
+                cur.execute("UPDATE works SET flag=?", (flag,))
+
+                msg = "Технические работы закончены"
+                if flag:  # правильное написание админу
+                    msg = "Технические работы начаты"
+                bot.send_message(
+                    message.chat.id, "Технические работы начаты")
+
+            con.commit()
+            con.close()
+        except exception as e:
+            bot.send_message(
+                message.chat.id, "Ты дурак?", reply_markup=admin_markup)
+
+
+@bot.message_handler(commands=['text'])  # красивое оформление текста
+def text(message):
+    if message.from_user.id in ADMINS_ID:
+        try:
+            text = text[1:]
+            text = text.split(';')
+            name, year, rate, time, translate, genre, age, rezh, roles, desc = text
+            bot.send_message(
+                message.chat.id, f'🎥 {name} 🎥\n📆 Год: {year} 📆\n📊 Кинопоиск: {rate} 📊\n\
+                ⏰ Продолжительность: {time} ⏰\n🎤 Перевод: {translate} 🎤\n💾 Жанр: {genre} \
+                💾\n👨‍👩‍👦 Возраст: {age} 👨‍👩‍👦\n🙍‍♂️Режиссёр: {rezh} 🙍‍♂️\n👨‍👨‍👦‍👦 В ролях: {roles} 👨‍👨‍👦‍👦\n\
+                \n✉️ Описание: {desc}', reply_markup=cur_markup)
+        except exception as e:
+            bot.send_message(
+                message.chat.id, "Ты дурак?", reply_markup=admin_markup)
+
+
+@bot.message_handler(commands=['offers'])
+def day(message):
+    if message.from_user.id in ADMINS_ID:
+        try:
+            text = message.text[8:]
+            results, names, ids, prev_dates, text = {}, [], [], [], ''
+
+            # подготовка переменных для будущей работы
+            now = datetime.datetime.now()
+            month = now.month
+            day = now.day
+
+            # подборка нужного количества времени по введенным данным
+            delta = datetime.timedelta(days=0)
+            if text == 'day':
+                delta = datetime.timedelta(days=1)
+            elif text == 'week':
+                delta = datetime.timedelta(weeks=1)
+
+            prev = now - delta
+            prev_day, prev_month, prev_year = prev.day, prev.month, prev.year
+
+            if text == 'month':
+                prev_month = month - 1
+                if prev_month <= 0:  # цикличность месяцев
+                    prev_month = 12
+                    prev_year = prev.year - 1
+
+            # перевод настоящего времени в datetime модель
+            now_dt = datetime.date(now.year, now.month, now.day)
+            # перевод отсчитанного времени в datetime модель
+            prev_dt = datetime.date(prev_year, prev_month, prev_day)
+            range_dt = now_dt - prev_dt
+
+            # получение всех дат между настойщим и отсчитанным временем
+            for i in range(range_dt.days + 1):
+                dt = prev_dt + datetime.timedelta(i)
+                # преобразование дат в удобное для БД формат
+                prev_dates.append(str(dt.month) + '-' + str(dt.day))
+
+            con = sqlite3.connect("db.db")
+            cur = con.cursor()
+            res = cur.execute(
+                "SELECT name,votes,dates,id FROM films").fetchall()
+            con.close()
+
+            for i in prev_dates:
+                for j in res:
+                    # проверка голосовали ли за фильм + проверка на наличие фильм в исходном словаре
+                    if i in j[2] and j[0] not in results:
+                        # исходный словарь с нужными данными для быстрой работы в телеграме
+                        results[j[0], j[3]] = j[1]
+
+            if results:
+                # сортировка фильмов по кол-ву голосов за них (возр.)
+                results = sorted(results.items(), key=lambda x: x[1])
+                for i in results:
+                    text += str(i[0][1]) + " " * (6 - len(str(i[0][1]))) + "|  " + str(i[1]) + " " * (6 - len(str(i[1]))) + \
+                        "| " + i[0][0] + " " * \
+                        (13 - len(i[0][0])) + '\n'
+                text = "<pre><b>ID" + " " * 4 + "| " "Голоса" + " " + "| " + "Название\n" + \
+                    "-" * 6 + "+" + "-" * 8 + "+" + "-" * 15 + "\n" + text + "</b></pre>"
+                # преобразование результатов в удобную для восприятия таблицу
+
+                bot.send_message(
+                    message.chat.id, text, reply_markup=admin_markup, parse_mode='HTML')
+            else:
+                bot.send_message(
+                    message.chat.id, "Заказов пока нет", reply_markup=admin_markup)
+        except exception as e:
             bot.send_message(
                 message.chat.id, "Ты дурак?", reply_markup=admin_markup)
 
@@ -102,9 +192,7 @@ def welcome(message):
 def write(message):
     text = message.text
     try:
-        is_admin = message.from_user.id in [322846366, 1042144066]
-        cur_markup = markup
-
+        is_admin = message.chat.id in ADMINS_ID
         con = sqlite3.connect("db.db")
         cur = con.cursor()
         is_works = cur.execute("SELECT flag FROM works").fetchone()[0]
@@ -113,191 +201,103 @@ def write(message):
                 message.chat.id, 'Идут технические работы 👷🏻‍♂️. Напишите позже')
             return 0
         con.close()
-
-        if is_admin:
+        cur_markup = markup
+        if is_admin:  # функции админа для управления каналом
             cur_markup = admin_markup
             if text == 'Посмотреть заказы 💾':
                 bot.send_message(
-                    message.chat.id, 'За какой период посмотреть заказы?',
-                    reply_markup=date_markup)
+                    message.chat.id, 'Формат сообщения должен быть: \
+                    {/offers day/week/month}')
                 return 0
             elif text == "Создать текст ✉️":
                 bot.send_message(
-                    message.chat.id, 'Формат сообщения должен быть: ✉️{Название};{Год};{Рейтинг кинопоиска};{Продолжительность};{Перевод};{Жанр};{Возраст};{Режиссёр};{В ролях};{Описание}\n')
-                return 0
-            elif text[0] == '✉':
-                text = text[1:]
-                text = text.split(';')
-                name, year, rate, time, translate, genre, age, rezh, roles, desc = text
-                bot.send_message(
-                    message.chat.id, f'''🎥 {name} 🎥
-📆 Год: {year} 📆
-📊 Кинопоиск: {rate} 📊
-⏰ Продолжительность: {time} ⏰
-🎤 Перевод: {translate} 🎤
-💾 Жанр: {genre} 💾
-👨‍👩‍👦 Возраст: {age} 👨‍👩‍👦
-🙍‍♂️Режиссёр: {rezh} 🙍‍♂️
-👨‍👨‍👦‍👦 В ролях: {roles} 👨‍👨‍👦‍👦
-
-✉️ Описание: {desc}''', reply_markup=cur_markup)
+                    message.chat.id, 'Формат сообщения должен быть: /text{Название}\
+                    ;{Год};{Рейтинг кинопоиска};{Продолжительность};{Перевод};\
+                    {Жанр};{Возраст};{Режиссёр};{В ролях};{Описание}\n')
                 return 0
             elif text == 'Отправить БД 📝':
-                f = open("db.db", "rb")
-                bot.send_document(message.chat.id, f)
+                send_bd(message)
                 return 0
-            elif text in ["День", "Неделя", "Месяц"]:
-                now = datetime.datetime.now()
-                month = now.month
-                day = now.day
-                delta = datetime.timedelta(days=0)
-                if text == 'День':
-                    delta = datetime.timedelta(days=1)
-                elif text == 'Неделя':
-                    delta = datetime.timedelta(weeks=1)
-                then = now - delta
-                then_day, then_month, then_year = then.day, then.month, then.year
-                if text == 'Месяц':
-                    then_month = month - 1
-                    if then_month <= 0:
-                        then_month = 12
-                        then_year = then.year - 1
-                d1 = datetime.date(now.year, now.month, now.day)
-                d2 = datetime.date(then_year, then_month, then_day)
-                d3 = d1 - d2
-                prev_dates = []
-                for i in range(d3.days + 1):
-                    dt = d2 + datetime.timedelta(i)
-                    prev_dates.append(str(dt.month) + '-' + str(dt.day))
-                con = sqlite3.connect("db.db")
-                cur = con.cursor()
-                res = cur.execute(
-                    "SELECT name,votes,dates,id FROM films").fetchall()
-                con.close()
-                results = {}
-                names = []
-                ids = []
-                for i in prev_dates:
-                    for j in res:
-                        if i in j[2] and j[0] not in results:
-                            results[j[0], j[3]] = j[1]
-                text = ''
-                if results:
-                    results = sorted(results.items(), key=lambda x: x[1])
-                    for i in results:
-                        text += str(i[0][1]) + " " * (6 - len(str(i[0][1]))) + "|  " + str(i[1]) + " " * (6 - len(str(i[1]))) + \
-                            "| " + i[0][0] + " " * \
-                            (13 - len(i[0][0])) + '\n'
-                    bot.send_message(
-                        message.chat.id, "<pre><b>ID" + " " * 4 + "| " "Голоса" + " " + "| " + "Название\n" + "-" * 6 + "+" + "-" * 8 + "+" + "-" * 15 + "\n" + text + "</b></pre>", reply_markup=cur_markup, parse_mode='HTML')
-                else:
-                    bot.send_message(
-                        message.chat.id, "Заказов пока нет", reply_markup=cur_markup)
-                return 0
-            elif text == "Начать технические работы 👷🏻‍♂️":
-                con = sqlite3.connect("db.db")
-                cur = con.cursor()
-                flag = cur.execute("SELECT flag FROM works").fetchone()[0]
-                if not flag:
-                    cur.execute("UPDATE works SET flag=1")
-                    bot.send_message(
-                        message.chat.id, "Технические работы начаты")
-                else:
-                    bot.send_message(
-                        message.chat.id, "Технические работы уже начаты")
-                con.commit()
-                con.close()
-                return 0
-            elif text == "Закончить технические работы 👷🏻‍♂️":
-                con = sqlite3.connect("db.db")
-                cur = con.cursor()
-                flag = cur.execute("SELECT flag FROM works").fetchone()[0]
-                if flag:
-                    cur.execute("UPDATE works SET flag=0")
-                    bot.send_message(
-                        message.chat.id, "Технические работы закончены")
-                else:
-                    bot.send_message(
-                        message.chat.id, "Технические работы не начаты")
-                con.commit()
-                con.close()
+            elif text == "Технические работы 👷🏻‍♂️":
+                bot.send_message(
+                    message.chat.id, "Формат сообщения должен быть: {/tech_works start/end}")
                 return 0
             elif text == "Удалить фильм из базы данных ❌":
                 bot.send_message(
                     message.chat.id, 'Формат сообщения должен быть: /delete {id фильма}\n')
                 return 0
-        elif len(text) > 123:
+        # недопустимые значения в названии фильма
+        if len(text) > 123 or "\n" in text or ';' in text:
             bot.send_message(
                 message.chat.id, "Не очень похоже на название фильма 👀")
             return 0
-        if "\n" in text or ';' in text:
-            bot.send_message(
-                message.chat.id, "Не очень похоже на название фильма 👀")
-            return 0
+
         if text == "Заказать фильм 🎥":
             bot.send_message(
                 message.chat.id, 'Формат заказа: {Название фильма (точное название с афиши)}',
                 reply_markup=types.ReplyKeyboardRemove())
         else:
-            current_id = message.from_user.id
-            film_title = text.lower()
-            now = datetime.datetime.now()
-            month = now.month
-            day = now.day
-            date = str(month) + '-' + str(day)
-            con = sqlite3.connect("db.db")
-            cur = con.cursor()
-            films = cur.execute(
-                "SELECT films FROM users WHERE id=?", (current_id,)).fetchone()
-            bdfilms = cur.execute(
-                "SELECT name FROM films").fetchall()
-            film_id = cur.execute(
-                "SELECT id FROM films WHERE name=?", (str(film_title),)).fetchone()
-            last_id = cur.execute(
-                "SELECT id FROM films").fetchall()
-            if last_id:
-                last_id = last_id[-1][0]
-            else:
-                last_id = 0
-            if not film_id:
-                film_id = last_id + 1
-            else:
-                film_id = film_id[0]
-            if not films:
-                cur.execute("INSERT INTO users VALUES (?, ?)",
-                            (current_id, film_id))
-                add_film(current_id, film_title, date, bdfilms, cur, film_id)
-                bot.send_message(
-                    message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
-                bot.send_message(
-                    message.chat.id, OFFER)
-            else:
-                films = str(films[0])
-                if str(film_id) in films.split(';'):
-                    bot.send_message(
-                        message.chat.id, 'Извините, вы уже голосовали за этот фильм, но вы можете добавить другой', reply_markup=cur_markup)
-                else:
-                    mass_films = ''
-                    for i in films.split(';'):
-                        mass_films += i + ';'
-                    mass_films += str(film_id)
-                    cur.execute("UPDATE users SET films=? WHERE id=?",
-                                (mass_films, current_id))
-                    add_film(current_id, film_title,
-                             date, bdfilms, cur, film_id)
-                    bot.send_message(
-                        message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
-                    bot.send_message(
-                        message.chat.id, OFFER)
-            con.commit()
-            con.close()
+            make_offer()
+
+            # current_id = message.from_user.id
+            # film_title = text.lower()
+            # now = datetime.datetime.now()
+            # month = now.month
+            # day = now.day
+            # date = str(month) + '-' + str(day)
+            # con = sqlite3.connect("db.db")
+            # cur = con.cursor()
+            # films = cur.execute(
+            #     "SELECT films FROM users WHERE id=?", (current_id,)).fetchone()
+            # bdfilms = cur.execute(
+            #     "SELECT name FROM films").fetchall()
+            # film_id = cur.execute(
+            #     "SELECT id FROM films WHERE name=?", (str(film_title),)).fetchone()
+            # last_id = cur.execute(
+            #     "SELECT id FROM films").fetchall()
+            # if last_id:
+            #     last_id = last_id[-1][0]
+            # else:
+            #     last_id = 0
+            # if not film_id:
+            #     film_id = last_id + 1
+            # else:
+            #     film_id = film_id[0]
+            # if not films:
+            #     cur.execute("INSERT INTO users VALUES (?, ?)",
+            #                 (current_id, film_id))
+            #     add_film(current_id, film_title, date, bdfilms, cur, film_id)
+            #     bot.send_message(
+            #         message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
+            #     bot.send_message(
+            #         message.chat.id, OFFER)
+            # else:
+            #     films = str(films[0])
+            #     if str(film_id) in films.split(';'):
+            #         bot.send_message(
+            #             message.chat.id, 'Извините, вы уже голосовали за этот фильм, но вы можете добавить другой', reply_markup=cur_markup)
+            #     else:
+            #         mass_films = ''
+            #         for i in films.split(';'):
+            #             mass_films += i + ';'
+            #         mass_films += str(film_id)
+            #         cur.execute("UPDATE users SET films=? WHERE id=?",
+            #                     (mass_films, current_id))
+            #         add_film(current_id, film_title,
+            #                  date, bdfilms, cur, film_id)
+            #         bot.send_message(
+            #             message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
+            #         bot.send_message(
+            #             message.chat.id, OFFER)
+            # con.commit()
+            # con.close()
     except exception as e:
         bot.send_message(
             message.chat.id, f'Что-то пошло не так',
             reply_markup=types.ReplyKeyboardRemove())
         bot.send_message(
             322846366, f'Что-то пошло не так, ты дурач3к',
-            reply_markup=types.ReplyKeyboardRemove())
+            reply_markup=types.ReplyKeyboardRemove())  # Отправка сообщения создателю бота о поломке бота
 
 
 def add_film(current_id, film_title, date, bdfilms, cur, film_id):
@@ -317,18 +317,66 @@ def add_film(current_id, film_title, date, bdfilms, cur, film_id):
                     (votes, new_dates, film_title))
 
 
+def del_from_films(film_id, cur, last_id, name, votes, dates, message):
+    # если ID который нужен удалить меньше последнего из БД значит удалить ID невозможно
+    if last_id < int(film_id):
+        bot.send_message(message.chat.id, "Такого id не существует")
+        return 0
+    cur.execute("DELETE FROM films WHERE id=?", (film_id,))
+    # если последний ID больше чем выбранный, надо поставить фильм с последним ID на место удаленного
+    if last_id > int(film_id):
+        cur.execute("DELETE FROM films WHERE id=?", (last_id,))
+        cur.execute("INSERT INTO films VALUES (?,?,?,?)",
+                    (film_id, name, votes, dates))
+
+
+def del_from_users(film_id, cur, last_id, name, votes, dates, message):
+    res = cur.execute(
+        "SELECT * FROM users").fetchall()
+    for i in res:
+        deletable = film_id  # удаляемый ID
+        films = str(i[1])
+        if films:  # Если список желаний пуст, то и нечего удалять
+            films_list = films.split(";")
+            last_user_id = 0
+            first_user_id = 9999999999
+
+            for j in films_list:  # выбор минимального и максимального ID
+                j = int(j)
+                if j > last_user_id:
+                    last_user_id = j
+                if j < first_user_id:
+                    first_user_id = j
+            last_user_id, first_user_id = str(last_user_id), str(first_user_id)
+
+            # если удаляемый есть в списке желаний пользователя
+            if deletable in films_list:
+                # если последний ID есть в списке желаний надо удалить его
+                if last_id in films_list:
+                    deletable = last_id
+
+                films_list.remove(deletable)
+
+            # если последний ID есть в списке, а удаляемого нет, нужно удалить последний
+            elif last_id in films_list:
+                films_list.remove(last_id)
+                films_list.append(deletable)
+
+            # если новый желаемый список не пустой обновить, иначе удалить строку с данным пользователем
+            if films_list:
+                cur.execute(
+                    "UPDATE users SET films=? WHERE id=?", (films, i[0]))
+            else:
+                cur.execute(
+                    "DELETE FROM users WHERE id=?", (i[0],))
+
+
+def send_bd(message):
+    f = open("db.db", "rb")
+    bot.send_document(message.chat.id, f)
+
+
 bot.polling(none_stop=True)
-
-# {'content_type': 'text', 'id': 442, 'message_id': 442, 'from_user': {'id': 1042144066, 'is_bot': False, 'first_name': 'Max', 'username': None, 'last_name': 'Old', 'language_code': 'ru', 'can_join_groups': None, 'can_read_all_group_messages': None, 'supports_inline_queries': None}, 'date': 1626471987, 'chat': {'id': 1042144066, 'type': 'private', 'title': None, 'username': None, 'first_name': 'Max', 'last_name': 'Old', 'photo': None, 'bio': None, 'description': None, 'invite_link': None, 'pinned_message': None, 'permissions': None, 'slow_mode_delay': None, 'sticker_set_name': None, 'can_set_sticker_set': None, 'linked_chat_id': None, 'location': None}, 'forward_from': None, 'forward_from_chat': None, 'forward_from_message_id': None, 'forward_signature': None, 'forward_sender_name': None, 'forward_date': None, 'reply_to_message': None, 'edit_date': None, 'media_group_id': None, 'author_signature': None, 'text': '/start', 'entities': [<telebot.types.MessageEntity object at 0x035A2C40>], 'caption_entities': None, 'audio': None, 'document': None, 'photo': None, 'sticker': None, 'video': None, 'video_note': None, 'voice': None, 'caption': None, 'contact': None, 'location': None, 'venue': None, 'animation': None, 'dice': None, 'new_chat_member': None, 'new_chat_members': None, 'left_chat_member': None, 'new_chat_title': None, 'new_chat_photo': None, 'delete_chat_photo': None, 'group_chat_created': None, 'supergroup_chat_created': None, 'channel_chat_created': None, 'migrate_to_chat_id': None, 'migrate_from_chat_id': None, 'pinned_message': None, 'invoice': None, 'successful_payment': None, 'connected_website': None, 'reply_markup': None, 'json': {'message_id': 442, 'from': {'id': 1042144066, 'is_bot': False, 'first_name': 'Max', 'last_name': 'Old', 'language_code': 'ru'}, 'chat': {'id': 1042144066, 'first_name': 'Max', 'last_name': 'Old', 'type': 'private'}, 'date': 1626471987, 'text': '/start', 'entities': [{'offset': 0, 'length': 6, 'type': 'bot_command'}]}}
-
-
-# markup_clothes = types.ReplyKeyboardMarkup(resize_keyboard=True)
-# item1 = types.KeyboardButton("Низ")
-# item2 = types.KeyboardButton("Верх")
-# item3 = types.KeyboardButton("Обувь")
-# item4 = types.KeyboardButton("Аксессуары")
-# item5 = types.KeyboardButton("Главное меню")
-# markup_clothes.add(item1, item2, item3, item4, item5)
 
 
 # 1042144066 Максимка Шамин

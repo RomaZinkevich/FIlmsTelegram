@@ -89,7 +89,7 @@ def tech_works(message):
                 if flag:  # правильное написание админу
                     msg = "Технические работы начаты"
                 bot.send_message(
-                    message.chat.id, "Технические работы начаты")
+                    message.chat.id, msg)
 
             con.commit()
             con.close()

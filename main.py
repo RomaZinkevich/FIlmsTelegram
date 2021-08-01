@@ -30,7 +30,6 @@ ADMINS_ID = [322846366, 1042144066]
 
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    print(message.chat.id)
     if message.from_user.id in ADMINS_ID:  # разные сообщения для пользователей и админов
         bot.send_message(
             message.chat.id, 'Выберите одно из действий ниже ⬇️', reply_markup=admin_markup)
@@ -47,27 +46,30 @@ def warn(message):
 
             con = sqlite3.connect("db.db")
             cur = con.cursor()
-            film_name = cur.execute(
-                "SELECT name FROM films WHERE id=?", (text,)).fetchone()[0]  # получение названия фильма который надо убрать
 
+            users_to_text = []
             users = cur.execute("SELECT * FROM users").fetchall()
-            for i in users:
+            for i in users:  # +1 к warn
                 if text in str(i[1]).split(";"):
-                    if str(i[2]) == '2':
-                        banned = 1
-                    else:
-                        banned = int(i[3])
-                    warns = int(i[2]) + 1
-                    if warns == 4:
-                        warns -= 1
-                    cur.execute(
-                        "UPDATE users SET warns=?,banned=? WHERE id=?", (warns, banned, i[0]))
+                    users_to_text.append(i[0])
+                    if int(i[2]) < 3:
+                        if str(i[2]) == '2':
+                            banned = 1
+                        else:
+                            banned = int(i[3])
+                        warns = int(i[2]) + 1
+                        cur.execute(
+                            "UPDATE users SET warns=?,banned=? WHERE id=?", (warns, banned, i[0]))
             con.commit()
             con.close()
 
+            for i in users_to_text:
+                bot.send_message(
+                    i, "Вам было выдано предупреждение за заказ несуществующего фильма. Три таких предупреждения приводят к невозможности больше заказать фильм")
+
             # удаление фильма из базы данных
             delete(f'/delete {text}', from_another_func=True, message_id=message.chat.id)
-        except exception as e:
+        except:
             bot.send_message(
                 message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
 
@@ -198,7 +200,6 @@ def offers(message):
             res = cur.execute(
                 "SELECT name,votes,dates,id FROM films").fetchall()
             con.close()
-            print(res)
             for i in prev_dates:
                 for j in res:
                     # проверка голосовали ли за фильм + проверка на наличие фильм в исходном словаре
@@ -222,7 +223,7 @@ def offers(message):
             else:  # если список фильмов в БД пуст
                 bot.send_message(
                     message.chat.id, "Заказов пока нет", reply_markup=admin_markup)
-        except exception as e:
+        except:
             bot.send_message(
                 message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
 
@@ -237,17 +238,29 @@ def write(message):
         con = sqlite3.connect("db.db")
         cur = con.cursor()
         is_works = cur.execute("SELECT flag FROM works").fetchone()[0]
+        is_banned = cur.execute(
+            "SELECT banned FROM users WHERE id=?", (message.chat.id,)).fetchone()
+
+        try:  # проверка на существование banned у пользователя
+            is_banned = is_banned[0]
+        except:
+            pass
 
         # проверка на включение технических работа
-        if is_works and not is_admin:
-            bot.send_message(
-                message.chat.id, 'Идут технические работы 👷🏻‍♂️. Напишите позже')
-            return 0
+        if not is_admin:
+            if is_works:
+                bot.send_message(
+                    message.chat.id, 'Идут технические работы 👷🏻‍♂️. Напишите позже')
+                return 0
+            elif is_banned:
+                bot.send_message(
+                    message.chat.id, 'Извините, но вы были заблокированы за заказ несуществующих фильмов 😮')
+                return 0
         con.close()
 
-        cur_markup = markup  # Выбор правильной клавиатуры (админская/обычная)
+        cur_markup = markup  # По умолчанию клавиатура обычная
 
-        if is_admin:  # проверка на админа
+        if is_admin:  # Выбор правильной клавиатуры (админская/обычная)
             cur_markup = admin_markup
 
             # функции админа для управления каналом
@@ -284,7 +297,7 @@ def write(message):
             bot.send_message(
                 message.chat.id, 'Формат заказа: {Название фильма (точное название с афиши)}',
                 reply_markup=types.ReplyKeyboardRemove())
-        else:  # Обработка названия филмьа
+        else:  # Обработка названия фильма
             make_offer(text, message, cur_markup)
 
     except:
@@ -372,6 +385,8 @@ def make_offer(text, message, cur_markup):  # добавление фильма 
             # переделка в нужный для БД формат
             for i in users_films.split(';'):
                 result_films += i + ';'
+            if result_films in ["None;", ";"]:
+                result_films = ""
             result_films += str(film_id)
 
             cur.execute("UPDATE users SET films=? WHERE id=?",
@@ -419,7 +434,7 @@ def del_from_users(film_id, cur, last_id):
     for i in res:
         deletable = film_id  # удаляемый ID
         films = str(i[1])
-        if films:  # Если список желаний пуст, то и нечего удалять
+        if films and films != "None":  # Если список желаний пуст, то и нечего удалять
             films_list = films.split(";")
 
             last_user_id = 0
@@ -446,13 +461,8 @@ def del_from_users(film_id, cur, last_id):
                 films_list.remove(last_id)
                 films_list.append(deletable)
 
-            # если новый желаемый список не пустой обновить, иначе удалить строку с данным пользователем
-            if films_list:
-                cur.execute(
-                    "UPDATE users SET films=? WHERE id=?", (";".join(films_list), i[0]))
-            elif str(i[3]) == '0':
-                cur.execute(
-                    "DELETE FROM users WHERE id=?", (i[0],))
+            cur.execute(
+                "UPDATE users SET films=? WHERE id=?", (";".join(films_list), i[0]))
 
         con.commit()
 

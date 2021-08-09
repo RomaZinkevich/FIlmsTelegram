@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 import sqlite3
 import datetime
-
+import random
 
 # токен необходимый для работы бота
 TOKEN = '1820942989:AAFl17YwrZAo7vbubZqsViIIXsnpbAWnjow'
@@ -22,7 +22,8 @@ item4 = types.KeyboardButton("Отправить БД 📝")
 item5 = types.KeyboardButton("Удалить фильм из базы данных ❌")
 item6 = types.KeyboardButton("Технические работы 👷🏻‍♂️")
 item7 = types.KeyboardButton("Удалить и выдать предупреждение автору 😡")
-admin_markup.add(item1, item2, item3, item4, item5, item6, item7)
+item8 = types.KeyboardButton("Разбанить ❌")
+admin_markup.add(item1, item2, item3, item4, item5, item6, item7, item8)
 
 # глобальная переменная с ID админов канала
 ADMINS_ID = [322846366, 1042144066]
@@ -39,10 +40,21 @@ def welcome(message):
 
 
 @bot.message_handler(commands=['warn'])
-def warn(message):
-    if message.from_user.id in ADMINS_ID:
+def warn(message, from_another_func=False, message_id=0):
+    if from_another_func:  # проверка на то откуда запущена функция
+        id_from_user = message_id
+        text = message[6:]
+    else:
+        id_from_user = message.chat.id
+        text = message.text[6:]
+
+    if id_from_user in ADMINS_ID:
         try:
-            text = message.text[6:]
+            if '.' in text:
+                nums = text.split('.')
+                for i in nums:
+                    warn(f'/warn {i}', from_another_func=True, message_id=id_from_user)
+                return 0
 
             con = sqlite3.connect("db.db")
             cur = con.cursor()
@@ -51,10 +63,13 @@ def warn(message):
             users = cur.execute("SELECT * FROM users").fetchall()
             for i in users:  # +1 к warn
                 if text in str(i[1]).split(";"):
-                    users_to_text.append(i[0])
-                    if int(i[2]) < 3:
+                    bot.send_message(
+                        i[0], "Вам было выдано предупреждение за заказ несуществующего фильма. Три таких предупреждения приводят к невозможности больше заказать фильм")
+                    if int(i[2]) < 3:  # проверка на количество нарушений
                         if str(i[2]) == '2':
                             banned = 1
+                            bot.send_message(
+                                i[0], "Вы были забанены за заказ несуществующих фильмов. По всем вопросам писать -> @Tjr2710")
                         else:
                             banned = int(i[3])
                         warns = int(i[2]) + 1
@@ -63,15 +78,10 @@ def warn(message):
             con.commit()
             con.close()
 
-            for i in users_to_text:
-                bot.send_message(
-                    i, "Вам было выдано предупреждение за заказ несуществующего фильма. Три таких предупреждения приводят к невозможности больше заказать фильм")
-
             # удаление фильма из базы данных
-            delete(f'/delete {text}', from_another_func=True, message_id=message.chat.id)
+            delete(f'/delete {text}', from_another_func=True, message_id=id_from_user)
         except:
-            bot.send_message(
-                message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
+            mistake(message)
 
 
 @bot.message_handler(commands=['delete'])
@@ -85,6 +95,12 @@ def delete(message, from_another_func=False, message_id=0):
 
     if id_from_user in ADMINS_ID:
         try:
+            if '.' in film_id:
+                nums = film_id.split('.')
+                for i in nums:
+                    delete(f'/delete {i}', from_another_func=True, message_id=id_from_user)
+                return 0
+
             con = sqlite3.connect("db.db")
             cur = con.cursor()
 
@@ -107,6 +123,28 @@ def delete(message, from_another_func=False, message_id=0):
         except:
             bot.send_message(
                 id_from_user, "Где-то возникла ошибка", reply_markup=admin_markup)
+
+
+@bot.message_handler(commands=['unban'])
+def unban(message):
+    if message.from_user.id in ADMINS_ID:
+        try:
+            con = sqlite3.connect("db.db")
+            cur = con.cursor()
+
+            # получение id разбаненного пользователя
+            unbanned_id = int(message.text[7:])
+
+            cur.execute("UPDATE users SET warns=0, banned=0")
+            con.commit()
+            con.close()
+
+            bot.send_message(message.chat.id, "Успешно разбанен",
+                             reply_markup=admin_markup)
+            bot.send_message(
+                unbanned_id, "Вы были разбанены. Вы вновь можете заказывать фильмы")
+        except:
+            mistake(message)
 
 
 @bot.message_handler(commands=['tech_works'])
@@ -136,8 +174,7 @@ def tech_works(message):
             con.commit()
             con.close()
         except:
-            bot.send_message(
-                message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
+            mistake(message)
 
 
 @bot.message_handler(commands=['text'])  # красивое оформление текста
@@ -151,8 +188,7 @@ def text(message):
             bot.send_message(
                 message.chat.id, f'🎥 {name} 🎥\n📆 Год: {year} 📆\n📊 Кинопоиск: {rate} 📊\n⏰ Продолжительность: {time} ⏰\n🎤 Озвучка: {voiceover} 🎤\n💾 Жанр: {genre} 💾\n👨‍👩‍👦 Возраст: {age} 👨‍👩‍👦\n🙍‍♂️Режиссёр: {rezh} 🙍‍♂️\n👨‍👨‍👦‍👦 В ролях: {roles} 👨‍👨‍👦‍👦\n\n✉️ Описание: {desc}', reply_markup=admin_markup)
         except:
-            bot.send_message(
-                message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
+            mistake(message)
 
 
 @bot.message_handler(commands=['offers'])
@@ -160,8 +196,7 @@ def offers(message):
     if message.from_user.id in ADMINS_ID:
         try:
             text = message.text[8:]
-            results, names, ids, prev_dates, text = {}, [], [], [], ''
-
+            results, names, ids, prev_dates, msg = {}, [], [], [], ''
             # подготовка переменных для будущей работы
             now = datetime.datetime.now()
             month = now.month
@@ -188,13 +223,11 @@ def offers(message):
             # перевод отсчитанного времени в datetime модель
             prev_dt = datetime.date(prev_year, prev_month, prev_day)
             range_dt = now_dt - prev_dt
-
             # получение всех дат между настойщим и отсчитанным временем
             for i in range(range_dt.days + 1):
                 dt = prev_dt + datetime.timedelta(i)
                 # преобразование дат в удобное для БД формат
                 prev_dates.append(str(dt.month) + '-' + str(dt.day))
-
             con = sqlite3.connect("db.db")
             cur = con.cursor()
             res = cur.execute(
@@ -211,21 +244,20 @@ def offers(message):
                 # сортировка фильмов по кол-ву голосов за них (возр.)
                 results = sorted(results.items(), key=lambda x: x[1])
                 for i in results:
-                    text += str(i[0][1]) + " " * (6 - len(str(i[0][1]))) + "|  " + str(i[1]) + " " * (6 - len(str(i[1]))) + \
-                        "| " + i[0][0] + " " * \
-                        (13 - len(i[0][0])) + '\n'
-                text = "<pre><b>ID" + " " * 4 + "| " "Голоса" + " " + "| " + "Название\n" + \
-                    "-" * 6 + "+" + "-" * 8 + "+" + "-" * 15 + "\n" + text + "</b></pre>"
+                    msg += str(i[0][1]) + " " * (6 - len(str(i[0][1]))) + "|  " + str(i[1]) + " " * (6 - len(str(i[1]))) + \
+                        "| " + str(i[0][0]) + " " * \
+                        (13 - len(str(i[0][0]))) + '\n'
+                msg = "<pre><b>ID" + " " * 4 + "| " "Голоса" + " " + "| " + "Название\n" + \
+                    "-" * 6 + "+" + "-" * 8 + "+" + "-" * 15 + "\n" + msg + "</b></pre>"
                 # преобразование результатов в удобную для восприятия таблицу
 
                 bot.send_message(
-                    message.chat.id, text, reply_markup=admin_markup, parse_mode='HTML')
+                    message.chat.id, msg, reply_markup=admin_markup, parse_mode='HTML')
             else:  # если список фильмов в БД пуст
                 bot.send_message(
                     message.chat.id, "Заказов пока нет", reply_markup=admin_markup)
         except:
-            bot.send_message(
-                message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
+            mistake(message)
 
 
 @bot.message_handler(content_types=['text'])
@@ -254,7 +286,7 @@ def write(message):
                 return 0
             elif is_banned:
                 bot.send_message(
-                    message.chat.id, 'Извините, но вы были заблокированы за заказ несуществующих фильмов 😮')
+                    i[0], "Вы были забанены за заказ несуществующих фильмов. По всем вопросам писать -> @Tjr2710")
                 return 0
         con.close()
 
@@ -281,11 +313,15 @@ def write(message):
                 return 0
             elif text == "Удалить фильм из базы данных ❌":
                 bot.send_message(
-                    message.chat.id, 'Формат сообщения должен быть: /delete {id фильма}\n')
+                    message.chat.id, 'Формат сообщения должен быть: /delete {id фильма1.id фильма2}(через точку, без пробелов)\n')
                 return 0
             elif text == "Удалить и выдать предупреждение автору 😡":
                 bot.send_message(
-                    message.chat.id, 'Формат сообщения должен быть: /warn {id фильма}\n')
+                    message.chat.id, 'Формат сообщения должен быть: /warn {id фильма1.id фильма2} (через точку, без пробелов)\n')
+                return 0
+            elif text == "Разбанить ❌":
+                bot.send_message(
+                    message.chat.id, 'Формат сообщения: /unban {id пользователя}')
                 return 0
         # недопустимые значения в названии фильма
         if len(text) > 123 or "\n" in text or ';' in text or "/" in text:
@@ -348,16 +384,12 @@ def make_offer(text, message, cur_markup):  # добавление фильма 
         "SELECT name FROM films").fetchall()  # имена всех фильмов за которые когда-либо голосовали
     film_id = cur.execute(
         "SELECT id FROM films WHERE name=?", (str(film_title),)).fetchone()  # ID фильма за который проголосовал пользователь
-    last_id = cur.execute(
-        "SELECT id FROM films ORDER BY id").fetchall()  # ID последнего фильма в БД
-
-    if last_id:  # если фильмы в БД есть, то записываем ID последнего
-        last_id = last_id[-1][0]
-    else:
-        last_id = 0  # иначе ID последнего по сути равно 0
+    all_film_ids = cur.execute("SELECT id FROM films").fetchall()
 
     if not film_id:  # если фильма за который проголосовали нет в БД, дать ему ID последнего+1
-        film_id = last_id + 1
+        film_id = random.randint(10000, 99999)
+        while (film_id,) in all_film_ids:  # проверка на уникальный id
+            film_id = random.randint(10000, 99999)
     else:  # иначе оставить ему свой ID
         film_id = film_id[0]
 
@@ -369,9 +401,7 @@ def make_offer(text, message, cur_markup):  # добавление фильма 
                  cur, film_id)  # Добавление фильма в БД films
 
         bot.send_message(
-            message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
-        bot.send_message(
-            message.chat.id, 'Если вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869')
+            message.chat.id, "Ваш фильм добавлен в очередь❗️\nЕсли вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869", reply_markup=cur_markup)
     else:  # если пользователь уже голосовал за что-то
         users_films = str(users_films[0])
 
@@ -396,9 +426,7 @@ def make_offer(text, message, cur_markup):  # добавление фильма 
                      date, films_names, cur, film_id)  # Добавление фильма в БД films
 
             bot.send_message(
-                message.chat.id, "Ваш фильм добавлен в очередь❗️", reply_markup=cur_markup)
-            bot.send_message(
-                message.chat.id, 'Если вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869')
+                message.chat.id, "Ваш фильм добавлен в очередь❗️\nЕсли вы хотите помочь нашему каналу в развитии можете отправить произвольную сумму на карту ➡️ \n4274 3200 7290 8869", reply_markup=cur_markup)
 
     con.commit()
     con.close()
@@ -410,15 +438,10 @@ def del_from_films(film_id, cur, last_id, name, votes, dates, id_from_user):
 
     # если ID который нужен удалить меньше последнего из БД значит удалить ID невозможно
     if last_id < int(film_id):
-        bot.send_message(id_from_user.chat.id, "Такого id не существует")
+        bot.send_message(id_from_user, "Такого id не существует")
         return False
 
     cur.execute("DELETE FROM films WHERE id=?", (str(film_id),))
-    # если последний ID больше чем выбранный, надо поставить фильм с последним ID на место удаленного
-    if last_id > int(film_id):
-        cur.execute("DELETE FROM films WHERE id=?", (last_id,))
-        cur.execute("INSERT INTO films VALUES (?,?,?,?)",
-                    (film_id, name, votes, dates))
 
     con.commit()
     con.close()
@@ -437,29 +460,9 @@ def del_from_users(film_id, cur, last_id):
         if films and films != "None":  # Если список желаний пуст, то и нечего удалять
             films_list = films.split(";")
 
-            last_user_id = 0
-            first_user_id = 9999999999
-
-            for j in films_list:  # выбор минимального и максимального ID
-                j = int(j)
-                if j > last_user_id:
-                    last_user_id = j
-                if j < first_user_id:
-                    first_user_id = j
-            last_user_id, first_user_id = str(last_user_id), str(first_user_id)
-
             # если удаляемый есть в списке желаний пользователя
             if deletable in films_list:
-                # если последний ID есть в списке желаний надо удалить его
-                if last_id in films_list:
-                    deletable = last_id
-
                 films_list.remove(deletable)
-
-            # если последний ID есть в списке, а удаляемого нет, нужно удалить последний
-            elif last_id in films_list:
-                films_list.remove(last_id)
-                films_list.append(deletable)
 
             cur.execute(
                 "UPDATE users SET films=? WHERE id=?", (";".join(films_list), i[0]))
@@ -467,6 +470,11 @@ def del_from_users(film_id, cur, last_id):
         con.commit()
 
     con.close()
+
+
+def mistake(message):
+    bot.send_message(
+        message.chat.id, "Где-то возникла ошибка", reply_markup=admin_markup)
 
 
 def send_bd(message):
